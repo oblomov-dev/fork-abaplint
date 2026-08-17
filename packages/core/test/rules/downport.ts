@@ -1681,11 +1681,46 @@ ENDFORM.`;
     const expected = `FORM bar.
   DATA lt_list TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
   DATA temp1 LIKE sy-subrc.
+  DATA temp2 LIKE sy-tabix.
+  temp2 = sy-tabix.
   READ TABLE lt_list WITH KEY table_line = 123 TRANSPORTING NO FIELDS.
   temp1 = sy-subrc.
+  sy-tabix = temp2.
   IF temp1 = 0.
     WRITE / 'hello'.
   ENDIF.
+ENDFORM.`;
+
+    testFix(abap, expected);
+  });
+
+  it("line_exists(), sy-tabix is restored for a following DELETE INDEX", async () => {
+    const abap = `FORM bar.
+  DATA lt_list TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+  DATA lt_sel TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+  DATA lv_row TYPE i.
+  LOOP AT lt_list INTO lv_row.
+    IF NOT line_exists( lt_sel[ table_line = lv_row ] ).
+      DELETE lt_list INDEX sy-tabix.
+    ENDIF.
+  ENDLOOP.
+ENDFORM.`;
+
+    const expected = `FORM bar.
+  DATA lt_list TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+  DATA lt_sel TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
+  DATA lv_row TYPE i.
+  LOOP AT lt_list INTO lv_row.
+    DATA temp1 LIKE sy-subrc.
+    DATA temp2 LIKE sy-tabix.
+    temp2 = sy-tabix.
+    READ TABLE lt_sel WITH KEY table_line = lv_row TRANSPORTING NO FIELDS.
+    temp1 = sy-subrc.
+    sy-tabix = temp2.
+    IF NOT temp1 = 0.
+      DELETE lt_list INDEX sy-tabix.
+    ENDIF.
+  ENDLOOP.
 ENDFORM.`;
 
     testFix(abap, expected);
@@ -1702,8 +1737,11 @@ ENDFORM.`;
     const expected = `FORM bar.
   DATA lt_list TYPE voided.
   DATA temp1 LIKE sy-subrc.
+  DATA temp2 LIKE sy-tabix.
+  temp2 = sy-tabix.
   READ TABLE lt_list WITH KEY foo = 123 bar = 2 TRANSPORTING NO FIELDS.
   temp1 = sy-subrc.
+  sy-tabix = temp2.
   IF temp1 = 0.
     WRITE / 'hello'.
   ENDIF.
@@ -1723,8 +1761,11 @@ ENDFORM.`;
     const expected = `FORM bar.
   DATA lt_list TYPE voided.
   DATA temp1 LIKE sy-subrc.
+  DATA temp2 LIKE sy-tabix.
+  temp2 = sy-tabix.
   READ TABLE lt_list WITH KEY foo = 123 bar = '2' TRANSPORTING NO FIELDS.
   temp1 = sy-subrc.
+  sy-tabix = temp2.
   IF temp1 = 0 OR line_exists( lt_list[ foo = 1 bar = 5 ] ).
     WRITE / 'hello'.
   ENDIF.
@@ -1744,8 +1785,11 @@ ENDFORM.`;
     const expected = `FORM bar.
   DATA lt_list TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
   DATA temp1 LIKE sy-subrc.
+  DATA temp2 LIKE sy-tabix.
+  temp2 = sy-tabix.
   READ TABLE lt_list INDEX 1 TRANSPORTING NO FIELDS.
   temp1 = sy-subrc.
+  sy-tabix = temp2.
   IF temp1 = 0.
     WRITE / 'hello'.
   ENDIF.
@@ -1765,8 +1809,11 @@ ENDFORM.`;
     const expected = `FORM bar.
   DATA lt_list TYPE STANDARD TABLE OF i WITH DEFAULT KEY.
   DATA temp1 LIKE sy-subrc.
+  DATA temp2 LIKE sy-tabix.
+  temp2 = sy-tabix.
   READ TABLE lt_list WITH KEY table_line = 123 TRANSPORTING NO FIELDS.
   temp1 = sy-tabix.
+  sy-tabix = temp2.
   IF temp1 = 2.
     WRITE / 'hello'.
   ENDIF.
@@ -2139,8 +2186,11 @@ ENDFORM.`;
     const expected = `
     DATA ls_update TYPE voided.
     DATA temp1 LIKE sy-subrc.
+    DATA temp2 LIKE sy-tabix.
+    temp2 = sy-tabix.
     READ TABLE ls_update-users WITH KEY table_line = 2 TRANSPORTING NO FIELDS.
     temp1 = sy-subrc.
+    sy-tabix = temp2.
     IF temp1 = 0.
     ENDIF.`;
     testFix(abap, expected);
@@ -4671,8 +4721,11 @@ ENDIF.`;
     const expected = `
 DATA tab TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
 DATA temp1 LIKE sy-subrc.
+DATA temp2 LIKE sy-tabix.
+temp2 = sy-tabix.
 READ TABLE tab WITH KEY table_line = 'moo' TRANSPORTING NO FIELDS.
 temp1 = sy-subrc.
+sy-tabix = temp2.
 IF 1 = 2.
 ELSEIF temp1 = 0.
 ENDIF.`;
@@ -4695,8 +4748,11 @@ DATA tab TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
 IF 1 = 2.
   WRITE 'foo'.
   DATA temp1 LIKE sy-subrc.
+  DATA temp2 LIKE sy-tabix.
+  temp2 = sy-tabix.
   READ TABLE tab WITH KEY table_line = 'moo' TRANSPORTING NO FIELDS.
   temp1 = sy-subrc.
+  sy-tabix = temp2.
   IF 1 = 2.
     WRITE 'foo'.
   ELSEIF temp1 = 0.
@@ -4716,8 +4772,11 @@ ENDIF.`;
     const expected = `
 DATA tab TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
 DATA temp1 LIKE sy-subrc.
+DATA temp2 LIKE sy-tabix.
+temp2 = sy-tabix.
 READ TABLE tab WITH KEY table_line = 'moo' TRANSPORTING NO FIELDS.
 temp1 = sy-subrc.
+sy-tabix = temp2.
 IF 1 = 2.
 ELSEIF 1 = 2.
 ELSEIF temp1 = 0.

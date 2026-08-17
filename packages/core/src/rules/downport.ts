@@ -3279,13 +3279,21 @@ ${indentation}    output = ${uniqueName}.\n`;
         const tableName = expression.findFirstExpression(Expressions.Source)?.concatTokens().split("[")[0];
 
         const uniqueName = this.uniqueName(node.getFirstToken().getStart(), lowFile.getFilename(), highSyntax);
+        const tabixBackup = this.uniqueName(node.getFirstToken().getStart(), lowFile.getFilename(), highSyntax);
         const indentation = " ".repeat(node.getFirstToken().getStart().getCol() - 1);
 
         const sy = func === "LINE_EXISTS" ? "sy-subrc" : "sy-tabix";
 
+        // line_exists() and line_index() do not touch sy-tabix, the READ TABLE
+        // replacing them does - and sets it to 0 when the read fails. Without the
+        // restore, a following DELETE itab INDEX sy-tabix inside a LOOP hits index
+        // 0 and short dumps. replaceTableExpression() backs it up for the same reason
         const code = `DATA ${uniqueName} LIKE sy-subrc.\n` +
+          indentation + `DATA ${tabixBackup} LIKE sy-tabix.\n` +
+          indentation + `${tabixBackup} = sy-tabix.\n` +
           indentation + `READ TABLE ${tableName} ${condition}TRANSPORTING NO FIELDS.\n` +
           indentation + uniqueName + ` = ${sy}.\n` +
+          indentation + `sy-tabix = ${tabixBackup}.\n` +
           indentation ;
         let insertAt: Position | undefined = node.getFirstToken().getStart();
         if (node.get() instanceof ElseIf) {
