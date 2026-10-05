@@ -46,6 +46,7 @@ import {CyclomaticComplexityConf} from "../src/rules/cyclomatic_complexity";
 import {DangerousStatementConf} from "../src/rules/dangerous_statement";
 import {DbOperationInLoopConf} from "../src/rules/db_operation_in_loop";
 import {DefinitionsTopConf} from "../src/rules/definitions_top";
+import {DeleteIndexStaleTabixConf} from "../src/rules/delete_index_stale_tabix";
 import {DescriptionEmptyConf} from "../src/rules/description_empty";
 import {DoubleSpaceConf} from "../src/rules/double_space";
 import {DownportConf} from "../src/rules/downport";
@@ -260,6 +261,7 @@ export interface IConfig {
     "dangerous_statement"?: DangerousStatementConf | boolean,
     "db_operation_in_loop"?: DbOperationInLoopConf | boolean,
     "definitions_top"?: DefinitionsTopConf | boolean,
+    "delete_index_stale_tabix"?: DeleteIndexStaleTabixConf | boolean,
     "description_empty"?: DescriptionEmptyConf | boolean,
     "double_space"?: DoubleSpaceConf | boolean,
     "downport"?: DownportConf | boolean,
@@ -463,6 +465,7 @@ export interface IConfig {
     "dangerous_statement"?: DangerousStatementConf | boolean,
     "db_operation_in_loop"?: DbOperationInLoopConf | boolean,
     "definitions_top"?: DefinitionsTopConf | boolean,
+    "delete_index_stale_tabix"?: DeleteIndexStaleTabixConf | boolean,
     "description_empty"?: DescriptionEmptyConf | boolean,
     "double_space"?: DoubleSpaceConf | boolean,
     "downport"?: DownportConf | boolean,

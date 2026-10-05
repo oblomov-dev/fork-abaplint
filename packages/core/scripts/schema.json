@@ -1210,6 +1210,23 @@
       },
       "type": "object"
     },
+    "DeleteIndexStaleTabixConf": {
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "description": "List of file regex filename patterns to exclude, case insensitive",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/definitions/Severity",
+          "description": "Problem severity"
+        }
+      },
+      "type": "object"
+    },
     "DescriptionEmptyConf": {
       "additionalProperties": false,
       "properties": {
@@ -2339,6 +2356,17 @@
                 }
               ],
               "description": "Checks that definitions are placed at the beginning of METHODs, FORMs and FUNCTIONs.\nTags: SingleFile, Quickfix\nhttps://rules.abaplint.org/definitions_top"
+            },
+            "delete_index_stale_tabix": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DeleteIndexStaleTabixConf"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "DELETE itab INDEX sy-tabix inside LOOP AT itab, where sy-tabix belongs to another\ntable: an inner LOOP over another table, or a READ TABLE on another table\nbefore the DELETE.\nTags: SingleFile\nhttps://rules.abaplint.org/delete_index_stale_tabix"
             },
             "description_empty": {
               "anyOf": [
@@ -4550,6 +4578,17 @@
                 }
               ],
               "description": "Checks that definitions are placed at the beginning of METHODs, FORMs and FUNCTIONs.\nTags: SingleFile, Quickfix\nhttps://rules.abaplint.org/definitions_top"
+            },
+            "delete_index_stale_tabix": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/DeleteIndexStaleTabixConf"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "DELETE itab INDEX sy-tabix inside LOOP AT itab, where sy-tabix belongs to another\ntable: an inner LOOP over another table, or a READ TABLE on another table\nbefore the DELETE.\nTags: SingleFile\nhttps://rules.abaplint.org/delete_index_stale_tabix"
             },
             "description_empty": {
               "anyOf": [
