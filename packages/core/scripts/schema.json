@@ -3682,6 +3682,17 @@
               ],
               "description": "Strict SQL\nTags: Upport, Quickfix\nhttps://rules.abaplint.org/strict_sql"
             },
+            "subrc_after_assign": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SubrcAfterAssignConf"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "A sy-subrc test whose nearest preceding sy-subrc-setting statement is a plain\nASSIGN. On 7.40 SP7 a successful ASSIGN does not reset sy-subrc, so the test\nreads a value an earlier statement left behind.\nTags: SingleFile, Quickfix\nhttps://rules.abaplint.org/subrc_after_assign"
+            },
             "superclass_final": {
               "anyOf": [
                 {
@@ -5892,6 +5903,17 @@
                 }
               ],
               "description": "Strict SQL\nTags: Upport, Quickfix\nhttps://rules.abaplint.org/strict_sql"
+            },
+            "subrc_after_assign": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/SubrcAfterAssignConf"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "description": "A sy-subrc test whose nearest preceding sy-subrc-setting statement is a plain\nASSIGN. On 7.40 SP7 a successful ASSIGN does not reset sy-subrc, so the test\nreads a value an earlier statement left behind.\nTags: SingleFile, Quickfix\nhttps://rules.abaplint.org/subrc_after_assign"
             },
             "superclass_final": {
               "anyOf": [
@@ -9196,6 +9218,30 @@
           "description": "Problem severity"
         }
       },
+      "type": "object"
+    },
+    "SubrcAfterAssignConf": {
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "description": "List of file regex filename patterns to exclude, case insensitive",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "loops": {
+          "description": "Also report the shapes where `IS ASSIGNED` is not a drop-in replacement: the ASSIGN sits inside a loop, or the same field symbol was already assigned earlier in the same block. The finding is correct there too - the sy-subrc read is wrong either way - but the remedy needs an `UNASSIGN` first, so no quick fix is offered for them.",
+          "type": "boolean"
+        },
+        "severity": {
+          "$ref": "#/definitions/Severity",
+          "description": "Problem severity"
+        }
+      },
+      "required": [
+        "loops"
+      ],
       "type": "object"
     },
     "SuperclassFinalConf": {
