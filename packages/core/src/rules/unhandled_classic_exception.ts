@@ -14,7 +14,7 @@ import {ISpaghettiScopeNode} from "../abap/5_syntax/_spaghetti_scope";
 import {ReferenceType} from "../abap/5_syntax/_reference";
 import {MethodDefinition} from "../abap/types";
 import {FunctionModuleDefinition} from "../abap/types/function_module_definition";
-import {ExpressionNode, StatementNode} from "../abap/nodes";
+import {ExpressionNode, StatementNode, TokenNode} from "../abap/nodes";
 import {AbstractToken} from "../abap/1_lexer/tokens/abstract_token";
 import {Position} from "../position";
 import {VirtualPosition} from "../virtual_position";
@@ -27,6 +27,10 @@ export class UnhandledClassicExceptionConf extends BasicRuleConfig {
   public missingExceptions: boolean = true;
   /** missingExceptions: do not report a method call whose arguments are all literals or me, like describe_by_name( 'T100' ) */
   public allowLiteralArguments: boolean = true;
+  /** Report CALL FUNCTION without error_message, when the function module is known and can send a message of type E or A without RAISING */
+  public missingErrorMessage: boolean = true;
+  /** missingErrorMessage: also report calls of function modules that are not found (void) or called by a dynamic name */
+  public errorMessageVoid: boolean = false;
 }
 
 interface ICallee {
@@ -34,9 +38,22 @@ interface ICallee {
   exceptions: string[];
 }
 
+interface IKnownModule {
+  definition: FunctionModuleDefinition;
+  group: FunctionGroup;
+}
+
+interface ISentMessage {
+  /** E, A, or undefined for a message type that is not a literal */
+  type: string | undefined;
+  /** the function module or form that sends it, when it is not the called function module itself */
+  via: string | undefined;
+}
+
 export class UnhandledClassicException extends ABAPRule {
   private conf = new UnhandledClassicExceptionConf();
-  private functionModules: Map<string, FunctionModuleDefinition> | undefined;
+  private functionModules: Map<string, IKnownModule> | undefined;
+  private sentMessages = new Map<string, ISentMessage | undefined>();
 
   public getMetadata(): IRuleMetadata {
     return {
@@ -55,8 +72,15 @@ missingExceptions: reports calls without EXCEPTIONS of a method or function modu
 this includes functional calls, which cannot have EXCEPTIONS.
 With allowLiteralArguments, a method call whose arguments are all literals or me is not reported.
 
+missingErrorMessage: reports CALL FUNCTION without the predefined exception error_message, when the function module
+can send a message of type E or A without RAISING. OTHERS does not catch such a message, in dialog it is shown,
+in background, RFC and HTTP processing it ends the processing. The function module source is searched,
+including forms of its function group and function modules it calls. With errorMessageVoid, calls of function
+modules that are not found, or are called by a dynamic name, are also reported.
+CALL FUNCTION ... DESTINATION, STARTING NEW TASK, IN UPDATE TASK and IN BACKGROUND are not checked.
+
 Signatures are taken from the registry, including dependencies. Methods and function modules that are not
-found (void) are only checked by missingOthers.
+found (void) are only checked by missingOthers and errorMessageVoid.
 
 Does not report any issues if the code contains syntax errors`,
       tags: [RuleTag.Syntax],
@@ -84,6 +108,7 @@ cl_abap_typedescr=>describe_by_name(
   public initialize(reg: IRegistry) {
     super.initialize(reg);
     this.functionModules = undefined;
+    this.sentMessages = new Map<string, ISentMessage | undefined>();
     return this;
   }
 
@@ -161,8 +186,7 @@ cl_abap_typedescr=>describe_by_name(
 
     let callee: ICallee | undefined = undefined;
     if (nameNode.findFirstExpression(Expressions.FieldChain) === undefined) {
-      const name = nameNode.concatTokens().replace(/'/g, "").replace(/`/g, "");
-      const module = this.findFunctionModule(name);
+      const module = this.findFunctionModule(UnhandledClassicException.functionName(nameNode))?.definition;
       if (module) {
         callee = {
           name: module.getName(),
@@ -171,10 +195,181 @@ cl_abap_typedescr=>describe_by_name(
       }
     }
 
+    const issues: Issue[] = [];
     const issue = this.checkCall(file, nameNode.getFirstToken(), callee, statement.findDirectExpression(Expressions.FunctionParameters),
                                  statement.findDirectTokenByText("EXCEPTION-TABLE") !== undefined,
                                  statement.findDirectExpression(Expressions.Destination) !== undefined, false);
-    return issue ? [issue] : [];
+    if (issue) {
+      issues.push(issue);
+    }
+
+    const errorMessage = this.checkErrorMessage(statement, nameNode, file);
+    if (errorMessage) {
+      issues.push(errorMessage);
+    }
+    return issues;
+  }
+
+  private checkErrorMessage(statement: StatementNode, nameNode: ExpressionNode, file: ABAPFile): Issue | undefined {
+    if (this.conf.missingErrorMessage === false
+        || statement.findDirectExpression(Expressions.Destination) !== undefined
+        || statement.findDirectTokenByText("EXCEPTION-TABLE") !== undefined
+        || UnhandledClassicException.listsErrorMessage(statement)) {
+      return undefined;
+    }
+
+    const parameters = statement.findDirectExpression(Expressions.FunctionParameters);
+    const position = parameters?.findDirectTokenByText("EXCEPTIONS") || nameNode.getFirstToken();
+
+    const module = nameNode.findFirstExpression(Expressions.FieldChain) === undefined
+      ? this.findFunctionModule(UnhandledClassicException.functionName(nameNode))
+      : undefined;
+    if (module === undefined) {
+      if (this.conf.errorMessageVoid === false) {
+        return undefined;
+      }
+      const message = "No error_message, OTHERS does not catch a message that the function module sends without RAISING";
+      return Issue.atToken(file, position, message, this.getMetadata().key, this.conf.severity);
+    }
+
+    if (module.definition.isClassBasedExceptions()) {
+      return undefined;
+    }
+
+    const sent = this.findSentMessage(module.definition.getName().toUpperCase());
+    if (sent === undefined) {
+      return undefined;
+    }
+    const what = sent.type === undefined ? "a message with a dynamic type" : "a message of type " + sent.type;
+    const via = sent.via === undefined ? "" : ` via "${sent.via}"`;
+    const message = `"${module.definition.getName().toUpperCase()}" can send ${what}${via}, ` +
+      "add error_message to EXCEPTIONS, OTHERS does not catch it";
+    return Issue.atToken(file, position, message, this.getMetadata().key, this.conf.severity);
+  }
+
+  /** finds a MESSAGE of type E or A without RAISING in the function module, its forms and the function modules it calls */
+  private findSentMessage(moduleName: string): ISentMessage | undefined {
+    const key = "FUNCTION " + moduleName;
+    if (this.sentMessages.has(key)) {
+      return this.sentMessages.get(key);
+    }
+    this.sentMessages.set(key, undefined); // recursion guard
+
+    const module = this.findFunctionModule(moduleName);
+    const statements = module ? UnhandledClassicException.findBlock(module.group, Statements.FunctionModule, moduleName) : undefined;
+    const found = module && statements ? this.searchStatements(statements, module.group) : undefined;
+    this.sentMessages.set(key, found);
+    return found;
+  }
+
+  private findSentMessageInForm(group: FunctionGroup, formName: string): ISentMessage | undefined {
+    const key = "FORM " + group.getName() + " " + formName;
+    if (this.sentMessages.has(key)) {
+      return this.sentMessages.get(key);
+    }
+    this.sentMessages.set(key, undefined); // recursion guard
+
+    const statements = UnhandledClassicException.findBlock(group, Statements.Form, formName);
+    const found = statements ? this.searchStatements(statements, group) : undefined;
+    this.sentMessages.set(key, found);
+    return found;
+  }
+
+  private searchStatements(statements: readonly StatementNode[], group: FunctionGroup): ISentMessage | undefined {
+    for (const s of statements) {
+      const type = s.get();
+      if (type instanceof Statements.Message) {
+        if (s.findDirectTokenByText("RAISING") || s.findDirectTokenByText("INTO")) {
+          continue;
+        }
+        const messageType = UnhandledClassicException.messageType(s);
+        if (messageType === undefined || messageType === "E" || messageType === "A") {
+          return {type: messageType, via: undefined};
+        }
+      } else if (type instanceof Statements.CallFunction) {
+        const name = s.findDirectExpression(Expressions.FunctionName);
+        if (name === undefined
+            || name.findFirstExpression(Expressions.FieldChain) !== undefined
+            || s.findDirectExpression(Expressions.Destination)
+            || s.findDirectTokenByText("STARTING")
+            || s.findDirectTokenByText("UPDATE")
+            || s.findDirectTokenByText("BACKGROUND")
+            || s.findDirectTokenByText("EXCEPTION-TABLE")
+            || UnhandledClassicException.listsErrorMessage(s)) {
+          continue;
+        }
+        const called = UnhandledClassicException.functionName(name);
+        const found = this.findSentMessage(called);
+        if (found) {
+          return {type: found.type, via: found.via ?? called};
+        }
+      } else if (type instanceof Statements.Perform) {
+        const form = s.findDirectExpression(Expressions.FormName);
+        if (form === undefined
+            || s.findDirectTokenByText("PROGRAM")
+            || s.findDirectTokenByText("ON")
+            || s.findDirectExpression(Expressions.IncludeName)) {
+          continue;
+        }
+        const name = form.concatTokens().toUpperCase();
+        const found = this.findSentMessageInForm(group, name);
+        if (found) {
+          return {type: found.type, via: found.via ?? name};
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /** the statements between FUNCTION name and ENDFUNCTION, or FORM name and ENDFORM */
+  private static findBlock(group: FunctionGroup, start: typeof Statements.FunctionModule | typeof Statements.Form,
+                           name: string): StatementNode[] | undefined {
+    for (const file of group.getABAPFiles()) {
+      let block: StatementNode[] | undefined = undefined;
+      for (const s of file.getStatements()) {
+        if (block === undefined) {
+          const blockName = s.findDirectExpression(Expressions.Field) ?? s.findDirectExpression(Expressions.FormName);
+          if (s.get() instanceof start && blockName?.concatTokens().toUpperCase() === name) {
+            block = [];
+          }
+        } else if (s.get() instanceof Statements.EndFunction || s.get() instanceof Statements.EndForm) {
+          return block;
+        } else {
+          block.push(s);
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /** E, A, I, S, W or X, undefined if the type is not a literal */
+  private static messageType(statement: StatementNode): string | undefined {
+    const source = statement.findDirectExpression(Expressions.MessageSource);
+    const typeAndNumber = source?.findDirectExpression(Expressions.MessageTypeAndNumber);
+    if (typeAndNumber) {
+      return typeAndNumber.concatTokens().substring(0, 1).toUpperCase();
+    }
+
+    // MESSAGE ID id TYPE type NUMBER n, or MESSAGE text TYPE type
+    const parent = source ?? statement;
+    const children = parent.getChildren();
+    for (let i = 0; i < children.length - 1; i++) {
+      if (children[i] instanceof TokenNode && children[i].concatTokens().toUpperCase() === "TYPE") {
+        const literal = children[i + 1].concatTokens().match(/^['`]([a-zA-Z])['`]$/);
+        return literal ? literal[1].toUpperCase() : undefined;
+      }
+    }
+    return undefined;
+  }
+
+  private static listsErrorMessage(statement: StatementNode): boolean {
+    const list = statement.findDirectExpression(Expressions.FunctionParameters)?.findDirectExpression(Expressions.ParameterListExceptions);
+    return list?.findDirectExpressions(Expressions.ParameterException)
+      .some(e => e.getFirstChild()!.concatTokens().toUpperCase() === "ERROR_MESSAGE") === true;
+  }
+
+  private static functionName(nameNode: ExpressionNode): string {
+    return nameNode.concatTokens().replace(/'/g, "").replace(/`/g, "").toUpperCase();
   }
 
   private checkCall(file: ABAPFile, token: AbstractToken, callee: ICallee | undefined,
@@ -261,12 +456,12 @@ cl_abap_typedescr=>describe_by_name(
     }
   }
 
-  private findFunctionModule(name: string): FunctionModuleDefinition | undefined {
+  private findFunctionModule(name: string): IKnownModule | undefined {
     if (this.functionModules === undefined) {
-      this.functionModules = new Map<string, FunctionModuleDefinition>();
+      this.functionModules = new Map<string, IKnownModule>();
       for (const fugr of this.reg.getObjectsByType("FUGR")) {
         for (const module of (fugr as FunctionGroup).getModules()) {
-          this.functionModules.set(module.getName().toUpperCase(), module);
+          this.functionModules.set(module.getName().toUpperCase(), {definition: module, group: fugr as FunctionGroup});
         }
       }
     }

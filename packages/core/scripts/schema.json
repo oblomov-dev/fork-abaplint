@@ -11159,12 +11159,20 @@
           "description": "missingExceptions: do not report a method call whose arguments are all literals or me, like describe_by_name( 'T100' )",
           "type": "boolean"
         },
+        "errorMessageVoid": {
+          "description": "missingErrorMessage: also report calls of function modules that are not found (void) or called by a dynamic name",
+          "type": "boolean"
+        },
         "exclude": {
           "description": "List of file regex filename patterns to exclude, case insensitive",
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "missingErrorMessage": {
+          "description": "Report CALL FUNCTION without error_message, when the function module is known and can send a message of type E or A without RAISING",
+          "type": "boolean"
         },
         "missingExceptions": {
           "description": "Report a call without EXCEPTIONS, including a functional call, of a method or function module that declares classic exceptions",
@@ -11182,7 +11190,9 @@
       "required": [
         "missingOthers",
         "missingExceptions",
-        "allowLiteralArguments"
+        "allowLiteralArguments",
+        "missingErrorMessage",
+        "errorMessageVoid"
       ],
       "type": "object"
     },

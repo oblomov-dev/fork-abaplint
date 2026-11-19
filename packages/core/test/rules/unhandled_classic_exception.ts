@@ -133,6 +133,66 @@ async function findIssues(abap: string, config?: Partial<UnhandledClassicExcepti
   return rule.initialize(reg).run(prog);
 }
 
+interface IModule {
+  name: string;
+  exceptions?: string[];
+  classBased?: boolean;
+  body?: string;
+}
+
+/** a function group ZMSG with the given function modules and their source, plus extra includes, for example forms */
+function buildModules(modules: IModule[], include?: string): MemoryFile[] {
+  const functions = modules.map(m => `<item>
+     <FUNCNAME>${m.name}</FUNCNAME>
+     <SHORT_TEXT>test</SHORT_TEXT>
+     ${m.classBased ? "<EXCEPTION_CLASSES>X</EXCEPTION_CLASSES>" : ""}
+     <EXCEPTION>${(m.exceptions || []).map(e => `<RSEXC><EXCEPTION>${e}</EXCEPTION></RSEXC>`).join("")}</EXCEPTION>
+    </item>`).join("\n");
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <AREAT>test</AREAT>
+   <INCLUDES>
+    <SOBJ_NAME>LZMSGF01</SOBJ_NAME>
+    <SOBJ_NAME>SAPLZMSG</SOBJ_NAME>
+   </INCLUDES>
+   <FUNCTIONS>
+    ${functions}
+   </FUNCTIONS>
+  </asx:values>
+ </asx:abap>
+</abapGit>`;
+  const files = [
+    new MemoryFile("zmsg.fugr.xml", xml),
+    new MemoryFile("zmsg.fugr.saplzmsg.abap", "FUNCTION-POOL zmsg.\nINCLUDE lzmsgf01."),
+    new MemoryFile("zmsg.fugr.lzmsgf01.abap", include || ""),
+  ];
+  for (const m of modules) {
+    files.push(new MemoryFile(`zmsg.fugr.${m.name.toLowerCase()}.abap`, `FUNCTION ${m.name.toLowerCase()}.\n${m.body || ""}\nENDFUNCTION.`));
+  }
+  return files;
+}
+
+async function findErrorMessageIssues(abap: string, modules: IModule[], include?: string,
+                                      config?: Partial<UnhandledClassicExceptionConf>): Promise<readonly Issue[]> {
+  const reg = new Registry();
+  reg.addFile(new MemoryFile("zfoo.prog.abap", classes + abap));
+  for (const f of buildModules(modules, include)) {
+    reg.addFile(f);
+  }
+  await reg.parseAsync();
+  const prog = reg.getFirstObject()! as ABAPObject;
+  expect(new SyntaxLogic(reg, prog).run().issues.map(i => i.getMessage())).to.deep.equal([]);
+  for (const o of reg.getObjects()) {
+    expect(new SyntaxLogic(reg, o as ABAPObject).run().issues.map(i => i.getMessage())).to.deep.equal([]);
+  }
+
+  const rule = new UnhandledClassicException();
+  rule.setConfig({...new UnhandledClassicExceptionConf(), ...config});
+  return rule.initialize(reg).run(prog).filter(i => i.getMessage().includes("error_message"));
+}
+
 describe("Rule: unhandled_classic_exception", () => {
 
   it("parser error, no issues", async () => {
@@ -428,6 +488,184 @@ WRITE lv_unknown.`));
     it("option off", async () => {
       const issues = await findIssues(`
   lo_type = lcl_typedescr=>describe_by_name( lv_name ).`, {missingExceptions: false});
+      expect(issues.length).to.equal(0);
+    });
+
+  });
+
+  describe("missingErrorMessage", () => {
+
+    it("known function module sends a type E message, EXCEPTIONS has OTHERS", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'
+    EXCEPTIONS
+      OTHERS = 1.`, [{name: "Z_CHECK", body: "  MESSAGE e001(zz)."}]);
+      expect(issues.length).to.equal(1);
+      expect(issues[0].getMessage()).to.equal(
+        `"Z_CHECK" can send a message of type E, add error_message to EXCEPTIONS, OTHERS does not catch it`);
+      expect(issues[0].getStart().getRow()).to.equal(84);
+    });
+
+    it("known function module sends a type A message, call without EXCEPTIONS", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK", body: "  MESSAGE 'Failed' TYPE 'A'."}]);
+      expect(issues.length).to.equal(1);
+      expect(issues[0].getMessage()).to.contain("type A");
+      expect(issues[0].getStart().getRow()).to.equal(83);
+    });
+
+    it("dynamic message type", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'
+    EXCEPTIONS
+      OTHERS = 1.`, [{name: "Z_CHECK", body: "  MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno."}]);
+      expect(issues.length).to.equal(1);
+      expect(issues[0].getMessage()).to.contain("dynamic type");
+    });
+
+    it("message text in a variable called type", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK", body: "  DATA type TYPE string.\n  MESSAGE type TYPE 'S'."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("MESSAGE ID with literal type E", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK", body: "  MESSAGE ID 'ZZ' TYPE 'E' NUMBER '001'."}]);
+      expect(issues.length).to.equal(1);
+    });
+
+    it("message in a form of the function group", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'
+    EXCEPTIONS
+      OTHERS = 1.`, [{name: "Z_CHECK", body: "  PERFORM check."}], `FORM check.
+  MESSAGE e001(zz).
+ENDFORM.`);
+      expect(issues.length).to.equal(1);
+      expect(issues[0].getMessage()).to.contain(`via "CHECK"`);
+    });
+
+    it("message in a function module that the called function module calls", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_OUTER'
+    EXCEPTIONS
+      OTHERS = 1.`, [{name: "Z_OUTER", body: "  CALL FUNCTION 'Z_INNER'."}, {name: "Z_INNER", body: "  MESSAGE e001(zz)."}]);
+      expect(issues.length).to.equal(1);
+      expect(issues[0].getMessage()).to.contain(`"Z_OUTER" can send a message of type E via "Z_INNER"`);
+    });
+
+    it("nested call that lists error_message itself", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_OUTER'
+    EXCEPTIONS
+      OTHERS = 1.`, [{name: "Z_OUTER", body: `  CALL FUNCTION 'Z_INNER'
+    EXCEPTIONS
+      error_message = 1
+      OTHERS        = 2.`}, {name: "Z_INNER", body: "  MESSAGE e001(zz)."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("recursive function module", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'
+    EXCEPTIONS
+      OTHERS = 1.`, [{name: "Z_CHECK", body: "  CALL FUNCTION 'Z_CHECK'."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("error_message listed", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'
+    EXCEPTIONS
+      error_message = 1
+      OTHERS        = 2.`, [{name: "Z_CHECK", body: "  MESSAGE e001(zz)."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("MESSAGE ... RAISING is a classic exception, not reported", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'
+    EXCEPTIONS
+      not_found = 1
+      OTHERS    = 2.`, [{name: "Z_CHECK", exceptions: ["NOT_FOUND"], body: "  MESSAGE e001(zz) RAISING not_found."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("MESSAGE ... INTO is not sent", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK", body: "  DATA lv_text TYPE string.\n  MESSAGE e001(zz) INTO lv_text."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("types I, S, W and X are not reported", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK", body: `  MESSAGE i001(zz).
+  MESSAGE s001(zz).
+  MESSAGE 'Careful' TYPE 'W'.
+  MESSAGE x001(zz).`}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("message in a function module of the group that is not called", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK"}, {name: "Z_OTHER", body: "  MESSAGE e001(zz)."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("DESTINATION, STARTING NEW TASK and IN UPDATE TASK are not reported", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK' DESTINATION 'NONE'
+    EXCEPTIONS
+      system_failure        = 1
+      communication_failure = 2
+      OTHERS                = 3.
+  CALL FUNCTION 'Z_CHECK' STARTING NEW TASK 'TASK'.
+  CALL FUNCTION 'Z_CHECK' IN UPDATE TASK.`, [{name: "Z_CHECK", body: "  MESSAGE e001(zz)."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("function module with class-based exceptions", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK", classBased: true, body: "  MESSAGE e001(zz)."}]);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("unknown function module is not reported by default", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'CONVERSION_EXIT_SDATE_INPUT'
+    EXCEPTIONS
+      OTHERS = 1.`, []);
+      expect(issues.length).to.equal(0);
+    });
+
+    it("errorMessageVoid, unknown and dynamic function modules", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'CONVERSION_EXIT_SDATE_INPUT'
+    EXCEPTIONS
+      OTHERS = 1.
+  lv_fm = 'SEO_CLASS_READ'.
+  CALL FUNCTION lv_fm.
+  CALL FUNCTION lv_fm
+    EXCEPTIONS
+      error_message = 1
+      OTHERS        = 2.`, [], undefined, {errorMessageVoid: true});
+      expect(issues.length).to.equal(2);
+      expect(issues[0].getMessage()).to.equal("No error_message, OTHERS does not catch a message that the function module sends without RAISING");
+      expect(issues[0].getStart().getRow()).to.equal(84);
+      expect(issues[1].getStart().getRow()).to.equal(87);
+    });
+
+    it("errorMessageVoid does not report a known function module without messages", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK"}], undefined, {errorMessageVoid: true});
+      expect(issues.length).to.equal(0);
+    });
+
+    it("option off", async () => {
+      const issues = await findErrorMessageIssues(`
+  CALL FUNCTION 'Z_CHECK'.`, [{name: "Z_CHECK", body: "  MESSAGE e001(zz)."}], undefined,
+                                                  {missingErrorMessage: false, errorMessageVoid: true});
       expect(issues.length).to.equal(0);
     });
 
