@@ -11759,6 +11759,84 @@ ENDCLASS.`;
     expect(issues.length).to.equals(0);
   });
 
+  it("error, me in static method, #3560", () => {
+    const abap = `CLASS lcl DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS run.
+  PRIVATE SECTION.
+    CLASS-DATA foo TYPE REF TO object.
+ENDCLASS.
+CLASS lcl IMPLEMENTATION.
+  METHOD run.
+    foo = me.
+  ENDMETHOD.
+ENDCLASS.`;
+    const issues = runProgram(abap);
+    expect(issues.length).to.equals(1);
+    expect(issues[0].getMessage()).to.equals(`"me" not found, findTop`);
+  });
+
+  it("error, write via me in static method, #3560", () => {
+    const abap = `CLASS lcl DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS run.
+    DATA a TYPE i.
+ENDCLASS.
+CLASS lcl IMPLEMENTATION.
+  METHOD run.
+    me->a = 1.
+  ENDMETHOD.
+ENDCLASS.`;
+    const issues = runProgram(abap);
+    expect(issues.length).to.equals(1);
+    expect(issues[0].getMessage()).to.equals(`"me" not found, Target`);
+  });
+
+  it("error, me in class_constructor, #3560", () => {
+    const abap = `CLASS lcl DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS class_constructor.
+    METHODS inst.
+ENDCLASS.
+CLASS lcl IMPLEMENTATION.
+  METHOD class_constructor.
+    me->inst( ).
+  ENDMETHOD.
+  METHOD inst.
+  ENDMETHOD.
+ENDCLASS.`;
+    const issues = runProgram(abap);
+    expect(issues.length).to.equals(1);
+    expect(issues[0].getMessage()).to.equals(`"me" not found, findTop`);
+  });
+
+  it("ok, me in instance method, implicit calls in static method, #3560", () => {
+    const abap = `CLASS lcl DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS run.
+    CLASS-METHODS helper RETURNING VALUE(rv) TYPE i.
+    METHODS inst.
+    DATA a TYPE i.
+    CLASS-DATA foo TYPE REF TO lcl.
+ENDCLASS.
+CLASS lcl IMPLEMENTATION.
+  METHOD run.
+    DATA(x) = helper( ).
+    helper( ).
+    CALL METHOD helper.
+  ENDMETHOD.
+  METHOD helper.
+  ENDMETHOD.
+  METHOD inst.
+    me->a = helper( ).
+    foo = me.
+    me->inst( ).
+  ENDMETHOD.
+ENDCLASS.`;
+    const issues = runProgram(abap);
+    expect(issues.length).to.equals(0);
+  });
+
   it("error, me as RETURNING parameter name", () => {
     const abap = `CLASS lcl DEFINITION.
   PUBLIC SECTION.

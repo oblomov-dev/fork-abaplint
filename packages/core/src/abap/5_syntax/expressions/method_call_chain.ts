@@ -179,13 +179,8 @@ export class MethodCallChain {
       return NewObject.runSyntax(first, input, targetType);
     } else if (first instanceof ExpressionNode && first.get() instanceof Expressions.Cast) {
       return Cast.runSyntax(first, input, targetType);
-    } else {
-      const meType = input.scope.findVariable("me")?.getType();
-      if (meType) {
-        return meType;
-      }
     }
-    return undefined;
+    return new ObjectOriented(input.scope).findEnclosingClassType();
   }
 
 }

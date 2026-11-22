@@ -31,7 +31,7 @@ export class MethodSource {
     let context: AbstractType | IMethodDefinition | undefined = this.findTop(first, input, children);
     let implicitMe = false;
     if (context === undefined) {
-      context = input.scope.findVariable("me")?.getType();
+      context = helper.findEnclosingClassType();
       children.unshift(first);
       implicitMe = true;
     }

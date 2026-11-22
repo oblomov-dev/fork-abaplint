@@ -12,6 +12,7 @@ import {TypedIdentifier} from "../types/_typed_identifier";
 import {Visibility} from "../4_file_information/visibility";
 import {IReferenceExtras} from "./_reference";
 import {ClassDefinition} from "../types";
+import {ObjectReferenceType} from "../types/basic";
 
 // todo, think some of the public methods can be made private
 // todo: changet this class to static? for performance
@@ -236,6 +237,12 @@ export class ObjectOriented {
       return undefined;
     }
     return `The special method "${name}" cannot be called directly`;
+  }
+
+  // the class of the enclosing implementation, the context of implicit method calls, also in static methods where "me" does not exist
+  public findEnclosingClassType(): ObjectReferenceType | undefined {
+    const classDef = this.scope.findClassDefinition(this.scope.getEnclosingClassName());
+    return classDef ? new ObjectReferenceType(classDef) : undefined;
   }
 
   // classic exceptions cannot be raised in a method declaring class based exceptions, returns the message otherwise
