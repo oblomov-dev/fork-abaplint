@@ -55,7 +55,7 @@ for example:
 
 This changes behaviour for configs that rely on omitted options being off. If that is too
 much for a minor release, alternatives are a warning for each option missing from an object
-config, or adding the change to the 3.0.0 collection (#543).
+config, or adding the change to the 3.0.0 collection (#543). Related: #3923 (config in YAML and rulesets), #398 ("Extend default" ruleset).
 
 Happy to open a PR for whichever variant you prefer.
 
