@@ -238,14 +238,26 @@ export class ExpressionNode extends AbstractNode<ExpressionNode | TokenNode> {
   }
 
   public findAllExpressionsRecursive(type: new () => IStatementRunnable): readonly ExpressionNode[] {
+    // depth first, parent before its children, with a stack instead of recursion: a chain of
+    // "&&" nests one Source per operator, thousands deep
     const ret: ExpressionNode[] = [];
-    for (const child of this.getChildren()) {
-      if (child instanceof TokenNode) {
-        continue;
-      } else if (child.get() instanceof type) {
-        ret.push(child);
+    const stack: ExpressionNode[] = [];
+    const push = (node: ExpressionNode) => {
+      const children = node.getChildren();
+      for (let i = children.length - 1; i >= 0; i--) {
+        const child = children[i];
+        if (child instanceof ExpressionNode) {
+          stack.push(child);
+        }
       }
-      ret.push(...child.findAllExpressionsRecursive(type));
+    };
+    push(this);
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      if (node.get() instanceof type) {
+        ret.push(node);
+      }
+      push(node);
     }
     return ret;
   }
